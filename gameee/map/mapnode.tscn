@@ -1,11 +1,17 @@
 [gd_scene format=3 uid="uid://davpd3fi5ghty"]
 
 [ext_resource type="PackedScene" uid="uid://dihfumtud88vp" path="res://player/player.tscn" id="1_fb6kn"]
+[ext_resource type="Script" uid="uid://dmrd8qruf10k5" path="res://server/server.gd" id="1_msmbi"]
+[ext_resource type="PackedScene" uid="uid://d0xrakwgqc8ux" path="res://player2/player2.tscn" id="3_8sar5"]
 
 [node name="Node2D" type="Node2D" unique_id=1937214954]
+script = ExtResource("1_msmbi")
 
 [node name="player" parent="." unique_id=2025470902 instance=ExtResource("1_fb6kn")]
 position = Vector2(188, 155)
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=7120730]
 zoom = Vector2(0.285, 0.285)
+
+[node name="player2" parent="." unique_id=480870143 instance=ExtResource("3_8sar5")]
+position = Vector2(-690, -465)
