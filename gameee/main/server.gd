@@ -38,9 +38,9 @@ func send(data):
 func data_process(data):
 	print(data)
 	if data.req == 0:
-		map.spawn(int(data.id), data.posx, data.posy)
+		map.spawn_me(int(data.id), data.posx, data.posy)
 	if data.req == 1:
 		pass
 	if data.req == 2:
-		map.spawn(int(data.id), data.posx, data.posy)
+		map.spawn_entity(int(data.id), data.posx, data.posy)
 		
