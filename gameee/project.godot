@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="gameee"
-run/main_scene="uid://davpd3fi5ghty"
+run/main_scene="uid://b7p3eujfskjxs"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
