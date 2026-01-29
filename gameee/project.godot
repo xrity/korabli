@@ -8,6 +8,10 @@
 
 config_version=5
 
+[accessibility]
+
+general/updates_per_second=24
+
 [application]
 
 config/name="gameee"

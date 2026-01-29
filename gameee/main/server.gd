@@ -2,7 +2,7 @@ extends Node
 
 @onready var map: Node2D = $".."
 var udp := PacketPeerUDP.new()
-var server_address := "10.10.135.240"
+var server_address := "158.195.205.45"
 var server_port := 9001
 var is_connected = false
 
