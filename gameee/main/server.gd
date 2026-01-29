@@ -36,11 +36,16 @@ func send(data):
 		print("send: ", json_string)
 		
 func data_process(data):
-	print(data)
 	if data.req == 0:
-		map.spawn_me(int(data.id), data.posx, data.posy)
+		print("spawn me ", data.id)
+		map.spawn_self(int(data.id), data.posx, data.posy)
 	if data.req == 1:
-		pass
-	if data.req == 2:
+		print("spawn ent ", data.id)
 		map.spawn_entity(int(data.id), data.posx, data.posy)
+	if data.req == 2:
+		print("move me ", data.apr)
+		map.move_self(data.apr)
+	if data.req == 3:
+		print("move ent ", data.posx, ' ', data.posy)
+		map.move_entity(int(data.id), data.posx, data.posy)
 		

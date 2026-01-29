@@ -1,7 +1,8 @@
 extends Node
 
 """
-0 - join
-1 - move
-2 - another join
+0 - join self
+1 - join entity
+2 - move self
+3 - move entity
 """
