@@ -1,12 +1,12 @@
 [gd_scene format=3 uid="uid://b7p3eujfskjxs"]
 
-[ext_resource type="Script" uid="uid://doddu0604armd" path="res://main/main.gd" id="1_t5pmm"]
+[ext_resource type="Script" uid="uid://doddu0604armd" path="res://scripts/main.gd" id="1_t5pmm"]
 [ext_resource type="PackedScene" uid="uid://v2m85se6qmti" path="res://main/server.tscn" id="2_7ik47"]
-[ext_resource type="Script" uid="uid://bfuuj1ft0kppt" path="res://main/server.gd" id="3_1t10m"]
+[ext_resource type="Script" uid="uid://bfuuj1ft0kppt" path="res://scripts/server.gd" id="3_1t10m"]
 
 [node name="map" type="Node2D" unique_id=1763456145]
 script = ExtResource("1_t5pmm")
-playerName = "suck"
+playerName = "zalupa"
 
 [node name="server" parent="." unique_id=299605802 instance=ExtResource("2_7ik47")]
 script = ExtResource("3_1t10m")

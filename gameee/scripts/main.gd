@@ -21,23 +21,31 @@ func _physics_process(delta: float) -> void:
 
 func spawn_self(id, posx, posy):
 	var player = player_temp.instantiate()
+	player.position = Vector2(posx, posy)
 	add_child(player)
+	
 	mainPlayerId = id
 	player.idp = id
 	players[id] = player
-	player.position = Vector2(posx, posy)
+	
 
 func spawn_entity(id, posx, posy):
+	if id == mainPlayerId:
+		return
 	var player = player_temp.instantiate()
+	player.position = Vector2(posx, posy)
 	add_child(player)
+	
 	player.idp = id
 	players[id] = player
-	player.position = Vector2(posx, posy)
 			
 func move_entity(id, posx, posy):
+	if id == mainPlayerId:
+		return
 	players[id].position.x = posx
 	players[id].position.y = posy
 	
-func move_self(apr):
-	if apr:
-		pass
+func move_self(apr, posx=null, posy=null):
+	if !apr:
+		players[mainPlayerId].position.x = posx
+		players[mainPlayerId].position.y = posy
