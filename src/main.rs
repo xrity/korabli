@@ -1,201 +1,187 @@
 use tokio::net::UdpSocket;
-use serde_json::Value;
-use serde_json::json;
+use serde_json::{json, Value};
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU32, Ordering};
-use tokio::time::{sleep, Duration};
+use std::sync::Arc;
+use tokio::sync::mpsc; // Каналы!
+use tokio::time::{self, Duration};
+use std::net::SocketAddr;
 
-#[derive(Debug)]
+// Внутренние команды сервера (от сети к логике)
+enum GameCommand {
+    Connect { addr: SocketAddr, name: String },
+    MoveRequest { addr: SocketAddr, target_x: f64, target_y: f64 },
+}
+
 struct Player {
     id: u32,
     name: String,
-    posx: f64,
-    posy: f64,
+    pos: (f64, f64), // x, y
+    last_processed_pos: (f64, f64), // Для валидации
     speed: f64,
 }
 
-type Players = Arc<Mutex<HashMap<std::net::SocketAddr, Player>>>;
-
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let socket = Arc::new(UdpSocket::bind("10.10.135.240:9001").await?);
+    let socket = Arc::new(UdpSocket::bind("10.121.217.53:9001").await?);
     println!("UDP server listening on 9001");
 
-    let players: Players = Arc::new(Mutex::new(HashMap::new()));
-    let player_id_counter = Arc::new(AtomicU32::new(1));
+    // Создаем канал: sender (tx) клонируем для сетевого цикла, receiver (rx) отдаем в тики
+    let (tx, rx) = mpsc::channel::<GameCommand>(100);
 
-    let mut buf = [0u8; 1024];
-
-    let players_clone = Arc::clone(&players);
-    let socket_clone = Arc::clone(&socket);
-
+    // Запускаем игровой цикл в отдельном таске
+    let socket_clone = socket.clone();
     tokio::spawn(async move {
-        server_tick(players_clone, socket_clone).await;
+        game_tick_loop(rx, socket_clone).await;
     });
 
+    // --- СЕТЕВОЙ ЦИКЛ (Только прием и парсинг) ---
+    let mut buf = [0u8; 1024];
     loop {
         let (len, addr) = socket.recv_from(&mut buf).await?;
         let data = &buf[..len];
-        let text = String::from_utf8_lossy(data);
 
-        match serde_json::from_str::<Value>(&text) {
-            Ok(json) => {
-                println!("Received from {}: {}", addr, json);
-                let req: u64 = json["req"].as_u64().unwrap();
+        // Парсим JSON (лучше вынести в отдельную функцию, чтобы не паниковать)
+        if let Ok(json) = serde_json::from_slice::<Value>(data) {
+            let req = json["req"].as_u64().unwrap_or(999);
 
-                match req {
-                    0 => {
-                        add_player( json["name"].as_str().unwrap(), addr, &players, &player_id_counter, &socket).await;
-                        println!("{:?}", players);
-                    },
-                    2 => {
-                        move_player(&players, addr, json, &socket).await;
+            match req {
+                0 => { // Join
+                    if let Some(name) = json["name"].as_str() {
+                        let _ = tx.send(GameCommand::Connect { 
+                            addr, 
+                            name: name.to_string() 
+                        }).await;
                     }
-                    _ => println!("Unexpected request"),
-                }
-
-
-            }
-            Err(e) => eprintln!("Invalid JSON from {}: {}", addr, e),
-        }
-        
-    }
-}
-
-async fn add_player(name: &str, addr: std::net::SocketAddr, players: &Players, player_id_counter: &Arc<AtomicU32>, socket: &UdpSocket){
-    let mut map = players.lock().unwrap();
-    if !map.contains_key(&addr){
-        let id = player_id_counter.fetch_add(1, Ordering::SeqCst);
-        let player = Player {
-        id,
-        name: name.to_string(),
-        posx: 50.0,
-        posy: 50.0,
-        speed: 100.0,
-        };
-
-        
-        
-        let addrs: Vec<std::net::SocketAddr> = {
-            map.keys().cloned().collect()
-        };
-
-        map.insert(addr, player);
-
-        let id = map.get(&addr).map(|p| p.id).unwrap();
-        let posx = map.get(&addr).map(|p| p.posx).unwrap();
-        let posy = map.get(&addr).map(|p| p.posy).unwrap();
-
-        let data = json!({
-            "req" : 0,
-            "id" : id,
-            "posx" : posx,
-            "posy" : posy 
-        });
-
-        socket.send_to(data.to_string().as_bytes(), addr).await.unwrap();
-        println!("{:?}", data);
-        
-
-        for ad in &addrs {
-            let data = json!({
-                "req" : 1,
-                "id" : map.get(&ad).map(|p| p.id),
-                "posx" : map.get(&ad).map(|p| p.posx),
-                "posy" : map.get(&ad).map(|p| p.posy),
-            });
-
-            let msg_str = data.to_string();
-            let msg_bytes = msg_str.as_bytes();
-
-            if let Err(e) = socket.send_to(msg_bytes, addr).await {
-                eprintln!("Не удалось отправить игроку {}: {}", ad, e);
+                },
+                2 => { // Move Request
+                    let x = json["posx"].as_f64().unwrap_or(0.0);
+                    let y = json["posy"].as_f64().unwrap_or(0.0);
+                    let _ = tx.send(GameCommand::MoveRequest { 
+                        addr, 
+                        target_x: x, 
+                        target_y: y 
+                    }).await;
+                },
+                _ => {}
             }
         }
-
-        let data = json!({
-            "req" : 1,
-            "id" : id,
-            "posx" : posx,
-            "posy" : posy,
-        });
-        
-        drop(map);
-
-        broadcast(socket, players, &data, Some(addr)).await;
-
-    }
-    
-
-}
-
-async fn change_player_position(players: &Players, addr: std::net::SocketAddr, json: Value){
-
-}
-
-async fn move_player(players: &Players, addr: std::net::SocketAddr, json: Value, socket: &UdpSocket){
-    let mut map = players.lock().unwrap();
-    let data = json!({
-            "req" : 2,
-            "apr" : true,
-        });
-
-    println!("{:?}", data);
-    
-    if let Some(player) = map.get_mut(&addr) {
-        player.posx = json["posx"].as_f64().unwrap_or(0.0);
-        player.posy = json["posy"].as_f64().unwrap_or(0.0);
-        println!("Координаты игрока {} обновлены у игрока!", player.name);
-    }
-
-    socket.send_to(data.to_string().as_bytes(), addr).await.unwrap();
-
-    let data = json!({
-            "req" : 3,
-            "id" : map.get(&addr).map(|p| p.id),
-            "posx" : map.get(&addr).map(|p| p.posx),
-            "posy" : map.get(&addr).map(|p| p.posy),
-    });
-
-    drop(map);
-    broadcast(socket, players, &data, Some(addr)).await;
-}
-
-async fn broadcast(socket: &UdpSocket, players: &Players, message: &serde_json::Value, addr: Option<std::net::SocketAddr>) {
-    let msg_str = message.to_string();
-    let msg_bytes = msg_str.as_bytes();
-
-    // Захватываем мьютекс только для того, чтобы собрать адреса
-    let addrs: Vec<std::net::SocketAddr> = {
-        let map = players.lock().unwrap();
-        match addr{
-            Some(a) => map.keys().filter(|&&p| p != a).cloned().collect(),
-            None => map.keys().cloned().collect()
-        }
-        
-    };
-
-    // Проходим по всем адресам и отправляем данные
-    for ad in addrs {
-        if let Err(e) = socket.send_to(msg_bytes, ad).await {
-            eprintln!("Не удалось отправить игроку {}: {}", ad, e);
-        }
     }
 }
 
-async fn server_tick(players: Players, socket: Arc<UdpSocket>) {
-    let tick_rate = std::time::Duration::from_secs_f64(1.0 / 32.0);
+// --- ИГРОВОЙ ЦИКЛ (Server Authoritative) ---
+async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSocket>) {
+    // HashMap теперь живет ТОЛЬКО здесь. Мьютексы не нужны!
+    let mut players: HashMap<SocketAddr, Player> = HashMap::new();
+    let mut next_id = 1;
     
+    // Тикрейт 32 раза в секунду (~31.25 мс)
+    let tick_duration = Duration::from_millis(31); 
+    let mut interval = time::interval(tick_duration);
+
     loop {
-        {
-            let mut map = players.lock().unwrap();
-            
-            
+        interval.tick().await; // Ждем следующего тика// 1. ОБРАБОТКА ВСЕХ ВХОДЯЩИХ СОБЫТИЙ
+        // Мы вычитываем всё, что накопилось в канале за время сна
+        while let Ok(cmd) = rx.try_recv() {
+            match cmd {
+                GameCommand::Connect { addr, name } => {
+                    if !players.contains_key(&addr) {
+                        let player = Player {
+                            id: next_id,
+                            name: name.clone(),
+                            pos: (50.0, 50.0),
+                            last_processed_pos: (50.0, 50.0),
+                            speed: 1000.0, // пикселей/единиц в секунду
+                        };
+                        
+                        // Ответ клиенту (инит)
+                        let resp = json!({ "data": { "id": next_id, "posx": 50.0, "posy": 50.0 }, "req": 0});
+                        let _ = socket.send_to(resp.to_string().as_bytes(), addr).await;
+
+                        players.insert(addr, player);
+                        println!("Игрок {} (ID {}) подключился", name, next_id);
+                        next_id += 1;
+
+
+                        let snapshot: Vec<Value> = players.values().map(|p| {
+                            json!({
+                                "id": p.id,
+                                "posx": p.pos.0,
+                                "posy": p.pos.1
+                            })
+                        }).collect();
+
+                        let broadcast_packet = json!({ "req": 1, "data": snapshot }).to_string();
+                        let bytes = broadcast_packet.as_bytes();
+
+                        for addr in players.keys() {
+                            let _ = socket.send_to(bytes, *addr).await;
+                        }
+                        
+                        // Тут можно сделать бродкаст о новом игроке всем остальным
+                    }
+                },
+                GameCommand::MoveRequest { addr, target_x, target_y } => {
+                    if let Some(player) = players.get_mut(&addr) {
+                        // --- ВАЛИДАЦИЯ (Purple Box из схемы) ---
+                        // Расчет дистанции
+                        let dx = target_x - player.pos.0;
+                        let dy = target_y - player.pos.1;
+                        let dist = (dx*dx + dy*dy).sqrt();
+
+                        // Максимально допустимая дистанция за время 1-го кадра (или времени с последнего апдейта)
+                        // Допустим, клиент шлет апдейты часто, берем запас
+                        let max_dist = player.speed * (0.034965 + 0.0015625); // 0.1с - примерный лаг + дельта
+
+                        // println!("{}", max_dist);
+                        // println!("{}", dist);
+
+
+                        if dist <= max_dist {
+                            // Valid move
+                            player.pos = (target_x, target_y);
+                            
+                            // Ответ клиенту: Approve
+                            println!("move aprove");
+                            let resp = json!({"data": { "apr": true }, "req": 2});
+                            let _ = socket.send_to(resp.to_string().as_bytes(), addr).await;
+                            println!("player moved");
+                        } else {
+                            // Cheater or Lag! Teleport back
+                            println!("Cheater detected or Lag! {} moved too fast", player.name);
+                            let resp = json!({"data": {  
+                                "apr": false, 
+                                "fix_x": player.pos.0, 
+                                "fix_y": player.pos.1 
+                            }, "req": 2});
+                            let _ = socket.send_to(resp.to_string().as_bytes(), addr).await;
+                        }
+                    }
+                }
+            }
         }
 
-        sleep(tick_rate).await;
+        // 2. РАССЫЛКА МИРА (SNAPSHOT)
+        // В реальной игре мы не шлем полный JSON каждый тик (это дорого), 
+        // но для примера соберем данные всех и разошлем.
+        
+
+        let snapshot: Vec<Value> = players.values().map(|p| {
+            json!({
+                "id": p.id,
+                "posx": p.pos.0,
+                "posy": p.pos.1
+            })
+        }).collect();
+
+        let broadcast_packet = json!({ "req": 3, "data": snapshot }).to_string();
+        let bytes = broadcast_packet.as_bytes();
+
+
+
+
+        for addr in players.keys() {
+            let _ = socket.send_to(bytes, *addr).await;
+        }
     }
 }
