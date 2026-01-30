@@ -5,7 +5,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
-
+use tokio::time::{sleep, Duration};
 
 #[derive(Debug)]
 struct Player {
@@ -21,13 +21,20 @@ type Players = Arc<Mutex<HashMap<std::net::SocketAddr, Player>>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let socket = UdpSocket::bind("158.195.205.45:9001").await?;
+    let socket = Arc::new(UdpSocket::bind("10.10.135.240:9001").await?);
     println!("UDP server listening on 9001");
 
     let players: Players = Arc::new(Mutex::new(HashMap::new()));
     let player_id_counter = Arc::new(AtomicU32::new(1));
 
     let mut buf = [0u8; 1024];
+
+    let players_clone = Arc::clone(&players);
+    let socket_clone = Arc::clone(&socket);
+
+    tokio::spawn(async move {
+        server_tick(players_clone, socket_clone).await;
+    });
 
     loop {
         let (len, addr) = socket.recv_from(&mut buf).await?;
@@ -54,6 +61,7 @@ async fn main() -> Result<()> {
             }
             Err(e) => eprintln!("Invalid JSON from {}: {}", addr, e),
         }
+        
     }
 }
 
@@ -75,6 +83,23 @@ async fn add_player(name: &str, addr: std::net::SocketAddr, players: &Players, p
             map.keys().cloned().collect()
         };
 
+        map.insert(addr, player);
+
+        let id = map.get(&addr).map(|p| p.id).unwrap();
+        let posx = map.get(&addr).map(|p| p.posx).unwrap();
+        let posy = map.get(&addr).map(|p| p.posy).unwrap();
+
+        let data = json!({
+            "req" : 0,
+            "id" : id,
+            "posx" : posx,
+            "posy" : posy 
+        });
+
+        socket.send_to(data.to_string().as_bytes(), addr).await.unwrap();
+        println!("{:?}", data);
+        
+
         for ad in &addrs {
             let data = json!({
                 "req" : 1,
@@ -91,43 +116,23 @@ async fn add_player(name: &str, addr: std::net::SocketAddr, players: &Players, p
             }
         }
 
-        map.insert(addr, player);
-        
-        let id = map.get(&addr).map(|p| p.id);
-        let posx = map.get(&addr).map(|p| p.posx);
-        let posy = map.get(&addr).map(|p| p.posy);
-
-        let data = json!({
-            "req" : 0,
-            "id" : id,
-            "posx" : posx,
-            "posy" : posy 
-        });
-
-        println!("{:?}", data);
-        socket.send_to(data.to_string().as_bytes(), addr).await.unwrap();
-
         let data = json!({
             "req" : 1,
             "id" : id,
             "posx" : posx,
             "posy" : posy,
         });
-
-        let msg_str = data.to_string();
-        let msg_bytes = msg_str.as_bytes();
-
-        // Захватываем мьютекс только для того, чтобы собрать адреса
         
+        drop(map);
 
-        // Проходим по всем адресам и отправляем данные
-        for ad in addrs {
-            if let Err(e) = socket.send_to(msg_bytes, ad).await {
-                eprintln!("Не удалось отправить игроку {}: {}", ad, e);
-            }
-        }
+        broadcast(socket, players, &data, Some(addr)).await;
+
     }
     
+
+}
+
+async fn change_player_position(players: &Players, addr: std::net::SocketAddr, json: Value){
 
 }
 
@@ -148,42 +153,49 @@ async fn move_player(players: &Players, addr: std::net::SocketAddr, json: Value,
 
     socket.send_to(data.to_string().as_bytes(), addr).await.unwrap();
 
-    let addrs: Vec<std::net::SocketAddr> = {
-        map.keys().filter(|&&p| p != addr).cloned().collect()
-    };
-
-    for ad in &addrs {
-        let data = json!({
+    let data = json!({
             "req" : 3,
             "id" : map.get(&addr).map(|p| p.id),
             "posx" : map.get(&addr).map(|p| p.posx),
             "posy" : map.get(&addr).map(|p| p.posy),
-        });
+    });
 
-        let msg_str = data.to_string();
-        let msg_bytes = msg_str.as_bytes();
-
-        if let Err(e) = socket.send_to(msg_bytes, ad).await {
-            eprintln!("Не удалось отправить игроку {}: {}", ad, e);
-        }
-        println!("Координаты игрока обновлены у всех игроков!");
-    }
+    drop(map);
+    broadcast(socket, players, &data, Some(addr)).await;
 }
 
-async fn broadcast(socket: &UdpSocket, players: &Players, message: &serde_json::Value) {
+async fn broadcast(socket: &UdpSocket, players: &Players, message: &serde_json::Value, addr: Option<std::net::SocketAddr>) {
     let msg_str = message.to_string();
     let msg_bytes = msg_str.as_bytes();
 
     // Захватываем мьютекс только для того, чтобы собрать адреса
     let addrs: Vec<std::net::SocketAddr> = {
         let map = players.lock().unwrap();
-        map.keys().cloned().collect()
+        match addr{
+            Some(a) => map.keys().filter(|&&p| p != a).cloned().collect(),
+            None => map.keys().cloned().collect()
+        }
+        
     };
 
     // Проходим по всем адресам и отправляем данные
-    for addr in addrs {
-        if let Err(e) = socket.send_to(msg_bytes, addr).await {
-            eprintln!("Не удалось отправить игроку {}: {}", addr, e);
+    for ad in addrs {
+        if let Err(e) = socket.send_to(msg_bytes, ad).await {
+            eprintln!("Не удалось отправить игроку {}: {}", ad, e);
         }
+    }
+}
+
+async fn server_tick(players: Players, socket: Arc<UdpSocket>) {
+    let tick_rate = std::time::Duration::from_secs_f64(1.0 / 32.0);
+    
+    loop {
+        {
+            let mut map = players.lock().unwrap();
+            
+            
+        }
+
+        sleep(tick_rate).await;
     }
 }
