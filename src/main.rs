@@ -1,7 +1,9 @@
+use serde_json::map::Keys;
 use tokio::net::UdpSocket;
 use serde_json::{json, Value};
 use anyhow::Result;
 use std::collections::HashMap;
+use std::mem::replace;
 use std::sync::Arc;
 use tokio::sync::mpsc; // Каналы!
 use tokio::time::{self, Duration};
@@ -10,20 +12,20 @@ use std::net::SocketAddr;
 // Внутренние команды сервера (от сети к логике)
 enum GameCommand {
     Connect { addr: SocketAddr, name: String },
-    MoveRequest { addr: SocketAddr, target_x: f64, target_y: f64 },
+    MoveRequest { addr: SocketAddr, target_x: i32, target_y: i32 },
 }
 
 struct Player {
-    id: u32,
+    id: u8,
     name: String,
-    pos: (f64, f64), // x, y
-    last_processed_pos: (f64, f64), // Для валидации
+    pos: (i32, i32), // x, y
+    last_processed_pos: (i32, i32), // Для валидации
     speed: f64,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let socket = Arc::new(UdpSocket::bind("10.121.217.53:9001").await?);
+    let socket = Arc::new(UdpSocket::bind("0.0.0.0:9001").await?);
     println!("UDP server listening on 9001");
 
     // Создаем канал: sender (tx) клонируем для сетевого цикла, receiver (rx) отдаем в тики
@@ -40,33 +42,36 @@ async fn main() -> Result<()> {
     loop {
         let (len, addr) = socket.recv_from(&mut buf).await?;
         let data = &buf[..len];
+        let req = data[0];
+        
+        println!("{req}   , {data:?}");
 
         // Парсим JSON (лучше вынести в отдельную функцию, чтобы не паниковать)
-        if let Ok(json) = serde_json::from_slice::<Value>(data) {
-            let req = json["req"].as_u64().unwrap_or(999);
+        // if let Ok(json) = serde_json::from_slice::<Value>(data) {
+        //     let req = json["req"].as_u64().unwrap_or(999);
 
-            match req {
-                0 => { // Join
-                    if let Some(name) = json["name"].as_str() {
-                        let _ = tx.send(GameCommand::Connect { 
-                            addr, 
-                            name: name.to_string() 
-                        }).await;
-                    }
-                },
-                2 => { // Move Request
-                    let x = json["posx"].as_f64().unwrap_or(0.0);
-                    let y = json["posy"].as_f64().unwrap_or(0.0);
-                    let _ = tx.send(GameCommand::MoveRequest { 
-                        addr, 
-                        target_x: x, 
-                        target_y: y 
+        match req {
+            0 => { // Join
+                let name = String::from_utf8_lossy(&data[1..len]).to_string();
+                    let _ = tx.send(GameCommand::Connect { 
+                        addr,
+                        name: name.to_string() 
                     }).await;
-                },
-                _ => {}
-            }
+                }
+            2 => { // Move Request
+                let x = &data[1..5];
+                let x = i32::from_le_bytes(x.try_into().expect("error x"));
+                let y = &data[5..9];
+                let y = i32::from_le_bytes(y.try_into().expect("error y"));
+                let _ = tx.send(GameCommand::MoveRequest { 
+                    addr, 
+                    target_x: x, 
+                    target_y: y 
+                }).await;
+            },
+            _ => {}  
         }
-    }
+}
 }
 
 // --- ИГРОВОЙ ЦИКЛ (Server Authoritative) ---
@@ -78,9 +83,10 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
     // Тикрейт 32 раза в секунду (~31.25 мс)
     let tick_duration = Duration::from_millis(31); 
     let mut interval = time::interval(tick_duration);
+    interval.set_missed_tick_behavior(time::MissedTickBehavior::Burst);
 
     loop {
-        interval.tick().await; // Ждем следующего тика// 1. ОБРАБОТКА ВСЕХ ВХОДЯЩИХ СОБЫТИЙ
+         // Ждем следующего тика// 1. ОБРАБОТКА ВСЕХ ВХОДЯЩИХ СОБЫТИЙ
         // Мы вычитываем всё, что накопилось в канале за время сна
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
@@ -89,36 +95,60 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
                         let player = Player {
                             id: next_id,
                             name: name.clone(),
-                            pos: (50.0, 50.0),
-                            last_processed_pos: (50.0, 50.0),
+                            pos: (50, 50),
+                            last_processed_pos: (50, 50),
                             speed: 1000.0, // пикселей/единиц в секунду
                         };
+                        println!("player connected: {}", player.name);
                         
                         // Ответ клиенту (инит)
-                        let resp = json!({ "data": { "id": next_id, "posx": 50.0, "posy": 50.0 }, "req": 0});
-                        let _ = socket.send_to(resp.to_string().as_bytes(), addr).await;
+                        let mut resp = Vec::new();
+
+                        resp.push(0u8);
+                        resp.extend_from_slice(&next_id.to_le_bytes());
+                        resp.extend_from_slice(&player.pos.0.to_le_bytes());
+                        resp.extend_from_slice(&player.pos.1.to_le_bytes());
+
+                        socket.send_to(&resp, addr).await.unwrap();
 
                         players.insert(addr, player);
                         println!("Игрок {} (ID {}) подключился", name, next_id);
                         next_id += 1;
 
-
-                        let snapshot: Vec<Value> = players.values().map(|p| {
-                            json!({
-                                "id": p.id,
-                                "posx": p.pos.0,
-                                "posy": p.pos.1
-                            })
-                        }).collect();
-
-                        let broadcast_packet = json!({ "req": 1, "data": snapshot }).to_string();
-                        let bytes = broadcast_packet.as_bytes();
-
-                        for addr in players.keys() {
-                            let _ = socket.send_to(bytes, *addr).await;
-                        }
+                        resp[0] = 1;
+                        resp.push(players.get(&addr).unwrap().name.len() as u8);
+                        resp.extend_from_slice(&players.get(&addr).unwrap().name.as_bytes());
                         
-                        // Тут можно сделать бродкаст о новом игроке всем остальным
+                
+                        let keys: Vec<SocketAddr> = players.keys().filter(|&&p| p != addr).cloned().collect();
+
+                        for i in keys{
+                            socket.send_to(&resp, &i).await.unwrap();
+                            let mut resp1: Vec<u8> = vec![1u8];
+
+                            let p = players.get(&i).unwrap();
+
+                            resp1.push(p.id);
+                            let x = p.pos.0.to_le_bytes();
+                            let y = p.pos.1.to_le_bytes();
+                            resp1.extend_from_slice(&x);
+                            resp1.extend_from_slice(&y);
+
+                            let name  = &p.name;
+                            resp1.push(name.len() as u8);
+                            resp1.extend_from_slice(name.as_bytes());
+
+                            socket.send_to(&resp1, addr).await.unwrap();
+                            
+                            
+                        }
+
+
+
+                        
+                        
+
+                        
                     }
                 },
                 GameCommand::MoveRequest { addr, target_x, target_y } => {
@@ -127,7 +157,7 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
                         // Расчет дистанции
                         let dx = target_x - player.pos.0;
                         let dy = target_y - player.pos.1;
-                        let dist = (dx*dx + dy*dy).sqrt();
+                        let dist = ((dx*dx + dy*dy) as f64).sqrt();
 
                         // Максимально допустимая дистанция за время 1-го кадра (или времени с последнего апдейта)
                         // Допустим, клиент шлет апдейты часто, берем запас
@@ -142,10 +172,11 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
                             player.pos = (target_x, target_y);
                             
                             // Ответ клиенту: Approve
-                            println!("move aprove");
-                            let resp = json!({"data": { "apr": true }, "req": 2});
-                            let _ = socket.send_to(resp.to_string().as_bytes(), addr).await;
-                            println!("player moved");
+                            let mut resp = vec![];
+                            resp.push(2u8);
+                            resp.push(1u8);
+                            socket.send_to(&resp, addr).await.unwrap();
+                            
                         } else {
                             // Cheater or Lag! Teleport back
                             println!("Cheater detected or Lag! {} moved too fast", player.name);
@@ -166,22 +197,39 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
         // но для примера соберем данные всех и разошлем.
         
 
-        let snapshot: Vec<Value> = players.values().map(|p| {
-            json!({
-                "id": p.id,
-                "posx": p.pos.0,
-                "posy": p.pos.1
-            })
-        }).collect();
+        // let snapshot: Vec<Value> = players.values().map(|p| {
+        //     json!({
+        //         "id": p.id,
+        //         "posx": p.pos.0,
+        //         "posy": p.pos.1
+        //     })
+        // }).collect();
 
-        let broadcast_packet = json!({ "req": 3, "data": snapshot }).to_string();
-        let bytes = broadcast_packet.as_bytes();
-
-
+        // let broadcast_packet = json!({ "req": 3, "data": snapshot }).to_string();
+        // let bytes = broadcast_packet.as_bytes();
 
 
-        for addr in players.keys() {
-            let _ = socket.send_to(bytes, *addr).await;
+
+
+        // for addr in players.keys() {
+        //     let _ = socket.send_to(bytes, *addr).await;
+        // }
+
+        let mut resp = vec![];
+        resp.push(3u8);
+        resp.push(0u8);
+
+        for player in players.values(){
+            resp[1] += 1;
+            resp.extend_from_slice(&player.id.to_le_bytes());
+            resp.extend_from_slice(&player.pos.0.to_le_bytes());
+            resp.extend_from_slice(&player.pos.1.to_le_bytes());
         }
+        println!("{:?}", resp);
+
+        for i in players.keys(){
+            socket.send_to(&resp, &i).await.unwrap();
+        }
+        interval.tick().await;
     }
 }
