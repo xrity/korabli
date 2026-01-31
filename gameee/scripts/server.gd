@@ -5,6 +5,7 @@ var udp := PacketPeerUDP.new()
 var server_address := "10.10.135.240"
 var server_port := 9001
 var is_connected = false
+var move_buffer = {}
 
 func _ready():
 	var err = udp.set_dest_address(server_address, server_port)
@@ -12,46 +13,53 @@ func _ready():
 		print("UDP готов к работе")
 		is_connected = true
 
-func _physics_process(delta: float) -> void:
-	if udp.get_available_packet_count() > 0:
+func _process(delta: float) -> void:
+	while udp.get_available_packet_count() > 0:
 		var packet = udp.get_packet()
-		var msg_string = packet.get_string_from_utf8()
-		var json = JSON.new()
-		var error = json.parse(msg_string)
-		if error == OK:
-			var msg = json.get_data()
-			data_process(msg)
-		else:
-			print("Ошибка парсинга JSON: ", msg_string)
+		data_process(packet)
+	
+	for i in move_buffer.keys():
+		map.move_entity(i, move_buffer[i][0], move_buffer[i][1])
 
-func send(data):
-	var json_string = JSON.stringify(data)
-	var packet_data = json_string.to_utf8_buffer()
-	
-	var err = udp.put_packet(packet_data)
-	if err != OK:
-		print("Ошибка отправки пакета: ", err)
-	else:
-		print("send: ", json_string)
+func _physics_process(delta: float) -> void:
+	pass
+
+func send(msg):
+	var packet = msg.data_array
+	udp.put_packet(packet)
 		
-func data_process(msg):
-	print("req ", msg.req)
-	print("data ", msg.data)
-	print()
+func data_process(packet):
+	var bytes = PackedByteArray(packet)
+	var buffer = StreamPeerBuffer.new()
+	buffer.data_array = bytes
 	
-	if msg.req == 0:
-		map.spawn_self(int(msg.data.id), msg.data.posx, msg.data.posy)
-	if msg.req == 1:
-		for dp in msg.data:
-			map.spawn_entity(int(dp.id), dp.posx, dp.posy)
-	if msg.req == 2:
-		if msg.data.apr:
-			map.move_self(msg.data.apr)
-		else:
-			#speed * (0.03125 + 0.0015625)
-			map.move_self(msg.data.apr, msg.data.fix_x, msg.data.fix_y)
-	if msg.req == 3:
-		for dp in msg.data:
-			map.move_entity(int(dp.id), dp.posx, dp.posy)
+	var req = buffer.get_u8()
+	if req == 0:
+		var id = buffer.get_u8()
+		var posx = buffer.get_32()
+		var posy = buffer.get_32()
+		map.spawn_self(id, posx, posy)
+	if req == 1:
+		var id = buffer.get_u8()
+		var posx = buffer.get_32()
+		var posy = buffer.get_32()
+		var name_len = buffer.get_u8()
+		var pname = buffer.get_utf8_string(name_len)
+		move_buffer[id] = [posx, posy]
+		map.spawn_entity(id, posx, posy, pname)
+		
+	if req == 2:
+		var apr = buffer.get_u8()
+		if !apr:
+			var posx = buffer.get_32()
+			var posy = buffer.get_32()
+			map.move_self(posx, posy)
+	if req == 3:
+		var players_count = buffer.get_u8()
+		for i in players_count:
+			var id = buffer.get_u8()
+			var posx = buffer.get_32()
+			var posy = buffer.get_32()
+			move_buffer[id] = [posx, posy]
 	
 		

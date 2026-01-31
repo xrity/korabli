@@ -6,7 +6,7 @@
 
 [node name="map" type="Node2D" unique_id=1763456145]
 script = ExtResource("1_t5pmm")
-playerName = "zalupa"
+mainPlayerName = "zh"
 
 [node name="server" parent="." unique_id=299605802 instance=ExtResource("2_7ik47")]
 script = ExtResource("3_1t10m")
