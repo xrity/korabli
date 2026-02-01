@@ -5,7 +5,7 @@ var udp := PacketPeerUDP.new()
 var server_address := "10.10.135.240"
 var server_port := 9001
 var is_connected = false
-var move_buffer = {}
+var packet_buffer = []
 
 func _ready():
 	var err = udp.set_dest_address(server_address, server_port)
@@ -16,10 +16,12 @@ func _ready():
 func _process(delta: float) -> void:
 	while udp.get_available_packet_count() > 0:
 		var packet = udp.get_packet()
-		data_process(packet)
+		packet_buffer.append(packet)
 	
-	for i in move_buffer.keys():
-		map.move_entity(i, move_buffer[i][0], move_buffer[i][1])
+	if packet_buffer:
+		for packet in packet_buffer:
+			data_process(packet)
+		packet_buffer.clear()
 
 func _physics_process(delta: float) -> void:
 	pass
@@ -33,6 +35,11 @@ func data_process(packet):
 	var buffer = StreamPeerBuffer.new()
 	buffer.data_array = bytes
 	
+	if not buffer.get_available_bytes():
+		return
+	
+	print(bytes)
+	
 	var req = buffer.get_u8()
 	if req == 0:
 		var id = buffer.get_u8()
@@ -45,7 +52,6 @@ func data_process(packet):
 		var posy = buffer.get_32()
 		var name_len = buffer.get_u8()
 		var pname = buffer.get_utf8_string(name_len)
-		move_buffer[id] = [posx, posy]
 		map.spawn_entity(id, posx, posy, pname)
 		
 	if req == 2:
@@ -60,6 +66,6 @@ func data_process(packet):
 			var id = buffer.get_u8()
 			var posx = buffer.get_32()
 			var posy = buffer.get_32()
-			move_buffer[id] = [posx, posy]
+			map.move_entity(id, posx, posy)
 	
 		

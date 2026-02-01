@@ -17,7 +17,7 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("q") and not is_spawned:
 		var msg = StreamPeerBuffer.new()
 		msg.put_u8(0)
-		for sign in "zh".to_utf8_buffer():
+		for sign in mainPlayerName.to_utf8_buffer():
 			msg.put_u8(sign)
 		server.send(msg)
 		
@@ -64,18 +64,4 @@ func move_entity(id, posx, posy):
 		
 	var dirx = posx - players[id].position.x
 	var diry = posy - players[id].position.y 
-	
-	players[id].direction = Vector2(dirx, diry)
-	
-	var lerpindx = get_process_delta_time() * 5
-	
-	if abs(dirx) > 3:
-		players[id].position.x = lerpf(players[id].position.x, posx, lerpindx)
-	else:
-		players[id].position.x = posx
-	
-	if abs(diry) > 3:
-		players[id].position.y = lerpf(players[id].position.y, posy, lerpindx)
-	else:
-		players[id].position.y = posy
-	
+	players[id].update_remote_position(Vector2(posx, posy))

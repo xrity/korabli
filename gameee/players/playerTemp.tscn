@@ -36,6 +36,33 @@ tracks/1/keys = {
 "values": [Vector2(4, 4)]
 }
 
+[sub_resource type="Animation" id="Animation_hfore"]
+resource_name = "attack"
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("body:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(4, 4)]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("body:frame")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [9]
+}
+
 [sub_resource type="Animation" id="Animation_pig4o"]
 resource_name = "idle_down"
 tracks/0/type = "value"
@@ -263,6 +290,7 @@ tracks/1/keys = {
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_jfc60"]
 _data = {
 &"RESET": SubResource("Animation_uobcn"),
+&"attack": SubResource("Animation_hfore"),
 &"idle_down": SubResource("Animation_pig4o"),
 &"idle_left": SubResource("Animation_f1u2r"),
 &"idle_right": SubResource("Animation_pcdek"),
@@ -277,10 +305,12 @@ _data = {
 script = ExtResource("1_uobcn")
 
 [node name="body" type="Sprite2D" parent="." unique_id=195886040]
+y_sort_enabled = true
 texture_filter = 1
-position = Vector2(0, -40)
+position = Vector2(0, 24)
 scale = Vector2(4, 4)
 texture = ExtResource("2_uobcn")
+offset = Vector2(0, -16)
 hframes = 9
 vframes = 5
 

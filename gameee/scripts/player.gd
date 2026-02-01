@@ -14,6 +14,8 @@ var direction = Vector2(0, 0)
 var dir_buffer = 'down'
 var is_attacking = false
 
+var target_position = null
+var interpolation_speed = 15.0
 
 
 func _physics_process(delta: float) -> void:
@@ -35,8 +37,22 @@ func _process(delta: float) -> void:
 		
 		if Input.is_action_just_pressed("k") and not is_attacking:
 			attack_process(direction)
+	else:
+		position = position.lerp(target_position, interpolation_speed * delta)
+		
+		if position.distance_to(target_position) < 2:
+			direction = Vector2.ZERO
 		
 	animation_process(direction.x, direction.y)
+
+func _ready():
+	target_position = position
+
+# Метод, который вызывается из main.gd
+func update_remote_position(new_pos: Vector2):
+	# Рассчитываем направление для анимаций до обновления позиции [cite: 3, 4]
+	direction = (new_pos - position).normalized() 
+	target_position = new_pos
 	
 func setPlayerName(nameinput):
 	pname = nameinput
@@ -61,6 +77,7 @@ func direction_process(dirx, diry):
 	elif diry < 0:
 		dir_buffer = "up"
 		return "up"
+	else: return dir_buffer
 		
 func attack_process(dir):
 	attack_collider.disabled = false
