@@ -38,30 +38,40 @@ func spawn_self(id, posx, posy):
 	
 
 #1
-func spawn_entity(id, posx, posy, name_entity):
-	if id == mainPlayerId:
+func spawn_entity(idServ, posxServ, posyServ, name_entityServ):
+	if idServ == mainPlayerId:
 		return
 
 	var player = player_temp.instantiate()
-	player.position = Vector2(posx, posy)
+	player.position = Vector2(posxServ, posyServ)
 	add_child(player)
 	
-	player.setPlayerName(name_entity)
+	player.setPlayerName(name_entityServ)
 	
-	player.idp = id
-	players[id] = player
+	player.idp = idServ
+	players[idServ] = player
 		
 		
 #2		
-func move_self(posx, posy):
-	players[mainPlayerId].position.x = posx
-	players[mainPlayerId].position.y = posy		
+func move_self(posxServ, posyServ):
+	players[mainPlayerId].position.x = posxServ
+	players[mainPlayerId].position.y = posyServ	
 
 #3			
-func move_entity(id, posx, posy):
-	if id == mainPlayerId:
+func move_entity(idServ, posxServ, posyServ, armAngleServ):
+	if idServ == mainPlayerId:
 		return
+	players[idServ].update_position(Vector2(posxServ, posyServ))
+	players[idServ].update_arm_angle(armAngleServ, 0.05)
+
+#4
+func attack_entity(idattServ, idgetServ, armAngleServ, hpgetServ):
+	if idgetServ != 0:
+		players[idgetServ].hp -= hpgetServ
 		
-	var dirx = posx - players[id].position.x
-	var diry = posy - players[id].position.y 
-	players[id].update_remote_position(Vector2(posx, posy))
+	if idattServ == mainPlayerId:
+		return
+	else:
+		players[idattServ].attack_process()
+		players[idattServ].update_arm_angle(armAngleServ, 0.5)
+	

@@ -6,6 +6,8 @@ var server_address := "10.10.135.240"
 var server_port := 9001
 var is_connected = false
 var packet_buffer = []
+var last_packet_time = 0
+
 
 func _ready():
 	var err = udp.set_dest_address(server_address, server_port)
@@ -17,6 +19,10 @@ func _process(delta: float) -> void:
 	while udp.get_available_packet_count() > 0:
 		var packet = udp.get_packet()
 		packet_buffer.append(packet)
+		var now = Time.get_ticks_msec()
+		if now - last_packet_time > 60:
+			print(now - last_packet_time)
+		last_packet_time = now
 	
 	if packet_buffer:
 		for packet in packet_buffer:
@@ -37,8 +43,6 @@ func data_process(packet):
 	
 	if not buffer.get_available_bytes():
 		return
-	
-	print(bytes)
 	
 	var req = buffer.get_u8()
 	if req == 0:
@@ -66,6 +70,21 @@ func data_process(packet):
 			var id = buffer.get_u8()
 			var posx = buffer.get_32()
 			var posy = buffer.get_32()
-			map.move_entity(id, posx, posy)
+			var arm_angle = buffer.get_u8()
+			map.move_entity(id, posx, posy, arm_angle)
+	if req == 4:
+		var pair_count = buffer.get_u8()
+		for i in pair_count:
+			var idatt = buffer.get_u8()
+			var idget = buffer.get_u8()
+			if idget != 0:
+				var arm_angle = buffer.get_u8()
+				var hpget = buffer.get_64()
+				map.attack_entity(idatt, idget, arm_angle, hpget)
+			else:
+				var arm_angle = buffer.get_u8()
+				var hpget = buffer.get_u8()
+				map.attack_entity(idatt, idget, arm_angle, hpget)
+				
 	
 		

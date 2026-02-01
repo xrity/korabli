@@ -2,12 +2,12 @@
 
 [ext_resource type="Script" uid="uid://ceeyve8h32mrl" path="res://scripts/player.gd" id="1_uobcn"]
 [ext_resource type="Texture2D" uid="uid://dalrx1s7u2xqt" path="res://assets/players/heros.png" id="2_uobcn"]
+[ext_resource type="Texture2D" uid="uid://c23irdguywy2d" path="res://assets/players/weapons.png" id="3_pig4o"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_pig4o"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_uobcn"]
 size = Vector2(32, 40)
-
-[sub_resource type="CircleShape2D" id="CircleShape2D_uobcn"]
-radius = 72.0
 
 [sub_resource type="Animation" id="Animation_uobcn"]
 length = 0.001
@@ -35,32 +35,17 @@ tracks/1/keys = {
 "update": 0,
 "values": [Vector2(4, 4)]
 }
-
-[sub_resource type="Animation" id="Animation_hfore"]
-resource_name = "attack"
-tracks/0/type = "value"
-tracks/0/imported = false
-tracks/0/enabled = true
-tracks/0/path = NodePath("body:scale")
-tracks/0/interp = 1
-tracks/0/loop_wrap = true
-tracks/0/keys = {
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("arm:position")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 0,
-"values": [Vector2(4, 4)]
-}
-tracks/1/type = "value"
-tracks/1/imported = false
-tracks/1/enabled = true
-tracks/1/path = NodePath("body:frame")
-tracks/1/interp = 1
-tracks/1/loop_wrap = true
-tracks/1/keys = {
-"times": PackedFloat32Array(0),
-"transitions": PackedFloat32Array(1),
-"update": 1,
-"values": [9]
+"values": [Vector2(0, 0)]
 }
 
 [sub_resource type="Animation" id="Animation_pig4o"]
@@ -290,7 +275,6 @@ tracks/1/keys = {
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_jfc60"]
 _data = {
 &"RESET": SubResource("Animation_uobcn"),
-&"attack": SubResource("Animation_hfore"),
 &"idle_down": SubResource("Animation_pig4o"),
 &"idle_left": SubResource("Animation_f1u2r"),
 &"idle_right": SubResource("Animation_pcdek"),
@@ -300,6 +284,46 @@ _data = {
 &"run_right": SubResource("Animation_og6qx"),
 &"run_up": SubResource("Animation_vi3k3")
 }
+
+[sub_resource type="Animation" id="Animation_hfore"]
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("arm:position")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, 0)]
+}
+
+[sub_resource type="Animation" id="Animation_ptmq2"]
+resource_name = "attack"
+length = 0.15
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("arm:position")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.010116374, 0.05632019, 0.06666667, 0.076320186),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(-8, 0), Vector2(24, 0), Vector2(-8, 0), Vector2(0, 0)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_pw73d"]
+_data = {
+&"RESET": SubResource("Animation_hfore"),
+&"attack": SubResource("Animation_ptmq2")
+}
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_hqfvk"]
+size = Vector2(32, 54.5)
 
 [node name="PlayerTemp" type="CharacterBody2D" unique_id=1662842715]
 script = ExtResource("1_uobcn")
@@ -314,13 +338,24 @@ offset = Vector2(0, -16)
 hframes = 9
 vframes = 5
 
+[node name="arm" type="Sprite2D" parent="." unique_id=1472812551]
+y_sort_enabled = true
+texture_filter = 1
+scale = Vector2(4, 4)
+texture = ExtResource("3_pig4o")
+offset = Vector2(8, 0)
+
+[node name="attack_area" type="Area2D" parent="arm" unique_id=363507371]
+scale = Vector2(0.25, 0.25)
+
+[node name="arm_collider" type="CollisionShape2D" parent="arm/attack_area" unique_id=879542008]
+position = Vector2(32, 0)
+shape = SubResource("CircleShape2D_pig4o")
+disabled = true
+
 [node name="collider" type="CollisionShape2D" parent="." unique_id=2071296068]
 position = Vector2(0, -4)
 shape = SubResource("RectangleShape2D_uobcn")
-
-[node name="attackCollider" type="CollisionShape2D" parent="." unique_id=161786438]
-shape = SubResource("CircleShape2D_uobcn")
-disabled = true
 
 [node name="namelabel" type="Label" parent="." unique_id=1493695797]
 anchors_preset = 15
@@ -333,5 +368,27 @@ grow_horizontal = 2
 grow_vertical = 2
 horizontal_alignment = 1
 
+[node name="hplabel" type="Label" parent="." unique_id=2019251987]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 24.0
+offset_right = 1.0
+offset_bottom = 47.0
+grow_horizontal = 2
+grow_vertical = 2
+horizontal_alignment = 1
+
 [node name="anim" type="AnimationPlayer" parent="." unique_id=714762111]
 libraries/ = SubResource("AnimationLibrary_jfc60")
+
+[node name="anim_arm" type="AnimationPlayer" parent="." unique_id=1642327958]
+libraries/ = SubResource("AnimationLibrary_pw73d")
+
+[node name="hitbox_area" type="Area2D" parent="." unique_id=1707202544]
+
+[node name="hitbox_collider" type="CollisionShape2D" parent="hitbox_area" unique_id=125759746]
+position = Vector2(0, -4.75)
+shape = SubResource("RectangleShape2D_hqfvk")
+
+[connection signal="area_entered" from="arm/attack_area" to="." method="_on_attack_area_area_entered"]
