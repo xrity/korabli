@@ -39,7 +39,9 @@ func spawn_self(idServ, hpServ, posxServ, posyServ):
 	player.position = Vector2(posxServ, posyServ)
 	player.idp = idServ
 	players[idServ] = player
+	
 	player.setPlayerName(mainPlayerName)
+	player.update_weapon(0)
 	
 	
 #1
@@ -61,11 +63,12 @@ func spawn_entity(idServ, hpServ, name_entityServ, posxServ, posyServ):
 func game_state_process(
 		tickServer, idServ, hpServ,
 		angleServ, posxServ, posyServ, 
-		is_attackingServ, is_dodgeServ, 
-		weaponServ
+		is_attackingServ, is_dodgeServ,
+		is_movingServ, weaponServ
 	):
 	if idServ != mainPlayerId:
 		players[idServ].hp = hpServ
+		players[idServ].is_moving = is_movingServ
 		players[idServ].update_position(Vector2(posxServ, posyServ))
 		players[idServ].update_arm_angle(angleServ)
 		if players[idServ].weapon_indx != weaponServ:
@@ -75,4 +78,5 @@ func game_state_process(
 		if is_dodgeServ:
 			players[idServ].dash()
 	else:
+		players[idServ].hp = hpServ
 		players[idServ].move_aprove_from_server(tickServer, posxServ, posyServ)

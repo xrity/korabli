@@ -75,11 +75,12 @@ func data_process(packet):
 			var posx = buffer.get_float()
 			var posy = buffer.get_float()
 			var is_attacking = buffer.get_u8()
-			var is_dodge = buffer.get_u8()
+			var is_dash = buffer.get_u8()
+			var is_moving = buffer.get_u8()
 			var weapon = buffer.get_u8()
 			lobby.game_state_process(
 				tick_server, id, hp, 
 				angle, posx, posy, 
-				is_attacking, is_dodge, 
-				weapon
+				is_attacking, is_dash, 
+				is_moving, weapon
 			)

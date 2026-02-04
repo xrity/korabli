@@ -33,10 +33,12 @@ var dir_buffer = 'down'
 
 var is_attacking = false
 var is_dashing = false
+var is_moving = false
 
 var move_buffer_client = {}
 var move_buffer_server  = []
 var attack_buffer = []
+
 
 func _physics_process(delta: float) -> void:
 	if idp == lobby.mainPlayerId:
@@ -48,6 +50,11 @@ func _physics_process(delta: float) -> void:
 		direction = Input.get_vector("left", "right", "up", "down")
 		velocity = speed * direction
 		move_and_slide()
+		
+		if direction:
+			is_moving = true
+		else:
+			is_moving = false
 		
 		if Input.is_action_just_pressed("attack") and not is_attacking:
 			attack()
@@ -68,8 +75,6 @@ func move_aprove_from_server(tick_serv, newposx, newposy):
 	if tick_serv in move_buffer_client:
 		var history_pos = move_buffer_client[tick_serv]
 		var server_pos = Vector2(newposx, newposy)
-		
-		print(position, ' ',history_pos, ' ', server_pos)
 
 		if history_pos.distance_to(server_pos) > 10.0:
 			position = server_pos
@@ -163,10 +168,10 @@ func attack():
 	if not current_weapon:
 		return
 	is_attacking = true
-	if direction == Vector2(0, 0):
-		current_weapon.anim_attack.play("attack_idle")
-	elif is_dashing:
+	if is_dashing:
 		current_weapon.anim_attack.play("attack_dash")
+	elif not is_moving:
+		current_weapon.anim_attack.play("attack_idle")
 	else:
 		current_weapon.anim_attack.play("attack_run")
 		
