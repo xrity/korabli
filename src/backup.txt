@@ -18,7 +18,7 @@ struct Player {
     id: u8,
     name: String,
     health: u32,
-    pos: (i32, i32), // (x, y)
+    pos: (f32, f32), // (x, y)
     speed: u16,
     direction: u8,
     weapon: u8,
@@ -132,7 +132,7 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
                             id: next_id,
                             health: 100,
                             name: name.clone(),
-                            pos: (50, 50),
+                            pos: (50.0, 50.0),
                             speed: 100,
                             direction: 0,
                             gun: 0,
@@ -188,8 +188,8 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
                     let move_direction = Vec2::new(x_direction as f32, y_direction as f32).normalize_or_zero();
                     
                     if let Some(player) = players.get_mut(&addr) {
-                        player.pos.0 += (move_direction.x * player.speed as f32 * 0.032) as i32;
-                        player.pos.1 += (move_direction.y * player.speed as f32 * 0.032) as i32;
+                        player.pos.0 += move_direction.x * player.speed as f32 * 0.03125;
+                        player.pos.1 += move_direction.y * player.speed as f32 * 0.03125;
                         player.direction = direction;
                         player.is_attacking = is_attacking as u8;
                         player.is_dodging = is_dodging as u8;
@@ -232,4 +232,47 @@ fn send_game_state(players: &HashMap<SocketAddr, Player>, socket: Arc<UdpSocket>
             let _ = socket.send_to(&data, addr).await;
         }
     });
+}
+
+fn move_and_slide(mut pos: Vec2, mut velocity: Vec2, walls: &[Wall], radius: f32) -> Vec2 {
+    let mut time_left = 1.0; // Доля времени тика
+    
+    // Делаем до 4-х попыток скольжения (на случай углов)
+    for _ in 0..4 {
+        if velocity.length_squared() < 0.001 { break; }
+        
+        let target = pos + velocity * time_left;
+        let mut collision: Option<(Vec2, Vec2)> = None; // (точка коллизии, нормаль)
+
+        // Ищем ближайшее столкновение
+        for wall in walls {
+            let cp = wall.closest_point(target);
+            let dist_vec = target - cp;
+            let dist = dist_vec.length();
+
+            if dist < radius {
+                let normal = dist_vec.normalize_or_zero();
+                collision = Some((cp, normal));
+                break; 
+            }
+        }
+
+        if let Some((_cp, normal)) = collision {
+            // 1. Выталкиваем из стены (как в Godot)
+            let overlap = radius - (target - _cp).length();
+            pos = target + normal * overlap;
+
+            // 2. Считаем вектор скольжения (проекция скорости на стену)
+            // Формула: v = v - dot(v, n) * n
+            velocity = velocity - normal * velocity.dot(normal);
+            
+            // Уменьшаем оставшееся время, чтобы не двигаться бесконечно
+            time_left *= 0.5; 
+        } else {
+            // Если столкновений нет — просто перемещаемся
+            pos = target;
+            break;
+        }
+    }
+    pos
 }
