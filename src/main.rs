@@ -1,4 +1,5 @@
 use std::time::Instant;
+use glam::Vec2;
 use tokio::net::UdpSocket;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -10,17 +11,22 @@ use std::net::SocketAddr;
 // Внутренние команды сервера (от сети к логике)
 enum GameCommand {
     Connect { addr: SocketAddr, name: String },
-    MoveRequest { addr: SocketAddr, target_x: i32, target_y: i32, direction: u8 },
-    AttackRequest { addr: SocketAddr, target: u8, direction: u8,},
+    TickRequest { addr: SocketAddr, x_direction: i8, y_direction: i8, direction: u8, is_attacking: bool, is_dodging: bool, current_weapon: u8, count: u8, ids: Option<Vec<u8>> },
 }
 
 struct Player {
     id: u8,
     name: String,
-    health: i64,
-    pos: (i32, i32), // (x, y)
-    speed: f64,
+    health: u32,
+    pos: (f32, f32), // (x, y)
+    speed: u16,
     direction: u8,
+    weapon: u8,
+    gun: u8,
+    current_weapon: u8,
+    is_attacking: u8,
+    is_dodging: u8,
+    can_move: bool,
 }
 
 #[tokio::main]
@@ -52,29 +58,51 @@ async fn main() -> Result<()> {
                         name: name.to_string() 
                     });
                 }
-            2 => { // Move Request
-                let x = &data[1..5];
-                let x = i32::from_le_bytes(x.try_into().expect("error x"));
-                let y = &data[5..9];
-                let y = i32::from_le_bytes(y.try_into().expect("error y"));
-                let direction: u8 = data[9];
-                println!("{direction}");
-                let _ = tx.try_send(GameCommand::MoveRequest { 
-                    addr, 
-                    target_x: x, 
-                    target_y: y,
-                    direction: direction, 
-                });
-            },
-            4 => { //Attack request
-                let target: u8 = data[1];
-                let direction: u8 = data[2];
+            2 => { // Tick request
+                let direction = data[1];
+                let x_direction = data[2] as i8;
+                let y_direction = data[3] as i8;
+                let is_dodging: bool = (0 != data[4]);
+                let current_weapon = data[5];
+                let is_attacking: bool = (0 != data[6]);
+                let mut count: u8 = 0;
+                if is_attacking{
+                    count = data[7];
+                }
+                match is_attacking {
+                    true => {
+                        let mut ids: Vec<u8> = Vec::with_capacity(count.try_into().unwrap());
+                        for i in 8..(count+8){
+                            ids.push(data[i as usize]);
+                        }
+                        let _ = tx.try_send(GameCommand::TickRequest { 
+                            addr, 
+                            x_direction,
+                            y_direction,
+                            direction,
+                            is_attacking,
+                            is_dodging,
+                            current_weapon,
+                            count,
+                            ids: Some(ids), 
+                        });
 
-                let _ = tx.try_send(GameCommand::AttackRequest { 
-                    addr,
-                    target, 
-                    direction, 
-                });
+                    },
+                    false => {
+                        let _ = tx.try_send(GameCommand::TickRequest { 
+                            addr, 
+                            x_direction,
+                            y_direction,
+                            direction,
+                            is_attacking,
+                            is_dodging,
+                            current_weapon,
+                            count,
+                            ids: None, 
+                        });
+                    },
+                }
+               
             },
             _ => {}  
         }
@@ -86,6 +114,7 @@ async fn main() -> Result<()> {
 async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSocket>) {
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
     let mut next_id = 1;
+    let mut tick_counter: u8 = 0;
     
     // tickrate 32 per sec (~31.25 ms)
     let tick_duration = Duration::from_millis(31); 
@@ -93,7 +122,6 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
     loop {
-        let mut attack_request_buffer: Vec<(u8, Option<u8>, u8)> = Vec::new();
 
         interval.tick().await;
         while let Ok(cmd) = rx.try_recv() {
@@ -104,33 +132,39 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
                             id: next_id,
                             health: 100,
                             name: name.clone(),
-                            pos: (50, 50),
-                            speed: 1000.0,
+                            pos: (50.0, 50.0),
+                            speed: 100,
                             direction: 0,
-                        };
-                        println!("player connected: {}", player.name);
-                        
+                            gun: 0,
+                            weapon: 0,
+                            current_weapon: 1,
+                            is_attacking: 0,                            
+                            is_dodging: 0,
+                            can_move: true,
+                        };                        
                         // response to connect
                         let mut resp = Vec::new();
 
                         resp.push(0u8);
+                        resp.push(tick_counter);
                         resp.extend_from_slice(&next_id.to_le_bytes());
+                        resp.extend_from_slice(&player.health.to_le_bytes());
                         resp.extend_from_slice(&player.pos.0.to_le_bytes());
                         resp.extend_from_slice(&player.pos.1.to_le_bytes());
 
                         socket.send_to(&resp, addr).await.unwrap();
+                        resp.remove(1);
 
                         players.insert(addr, player);
-                        println!("Игрок {} (ID {}) подключился", name, next_id);
+                        println!("Player {} (ID {}) connected", name, next_id);
                         next_id += 1;
 
                         resp[0] = 1;
                         resp.push(players.get(&addr).unwrap().name.len() as u8);
                         resp.extend_from_slice(&players.get(&addr).unwrap().name.as_bytes());
-                        
                 
                         let keys: Vec<SocketAddr> = players.keys().filter(|&&p| p != addr).cloned().collect();
-
+                        
                         for i in keys{
                             socket.send_to(&resp, &i).await.unwrap();
                             let mut resp1: Vec<u8> = vec![1u8];
@@ -138,130 +172,64 @@ async fn game_tick_loop(mut rx: mpsc::Receiver<GameCommand>, socket: Arc<UdpSock
                             let p = players.get(&i).unwrap();
 
                             resp1.push(p.id);
-                            let x = p.pos.0.to_le_bytes();
-                            let y = p.pos.1.to_le_bytes();
-                            resp1.extend_from_slice(&x);
-                            resp1.extend_from_slice(&y);
-
+                            resp1.extend_from_slice(&p.health.to_le_bytes());
+                            resp1.extend_from_slice(&p.pos.0.to_le_bytes());
+                            resp1.extend_from_slice(&p.pos.1.to_le_bytes());
                             let name  = &p.name;
                             resp1.push(name.len() as u8);
                             resp1.extend_from_slice(name.as_bytes());
 
 
                             socket.send_to(&resp1, addr).await.unwrap();
-                            
-                            
                         }
-
-                        
                     }
                 },
-                GameCommand::MoveRequest { addr, target_x, target_y , direction} => {
+                GameCommand::TickRequest { addr, x_direction, y_direction, direction, is_attacking, is_dodging, current_weapon, count, ids} => {
+                    let move_direction = Vec2::new(x_direction as f32, y_direction as f32).normalize_or_zero();
+                    
                     if let Some(player) = players.get_mut(&addr) {
-                        let dx = target_x - player.pos.0;
-                        let dy = target_y - player.pos.1;
-                        let dist = ((dx*dx + dy*dy) as f64).sqrt();
-
-                        let max_dist = player.speed * (0.034965 + 0.0015625);
+                        player.pos.0 += (move_direction.x * player.speed as f32 * 0.032);
+                        player.pos.1 += (move_direction.y * player.speed as f32 * 0.032);
                         player.direction = direction;
-
-
-                        if dist <= max_dist {
-                            // Valid move
-                            player.pos = (target_x, target_y);
-                            
-                            let socket_clone = socket.clone();
-                            tokio::spawn(async move {
-                                let mut resp = vec![];
-                                resp.push(2u8);
-                                resp.push(1u8);
-                                socket_clone.send_to(&resp, addr).await.unwrap();
-                            });
-                        } else {
-                            println!("Cheater detected or Lag! {} moved too fast", player.name);
-                            // let _ = socket.send_to(resp.to_string().as_bytes(), addr).await;
-                        }
+                        player.is_attacking = is_attacking as u8;
+                        player.is_dodging = is_dodging as u8;
+                        player.current_weapon = current_weapon;
                     }
                 },
-                GameCommand::AttackRequest { addr, target, direction } => {
-                    let mut dist: f64 = 0.0;
-                    for player in players.values(){
-                        if player.id == target{
-                            let dx = players.get(&addr).unwrap().pos.0 - player.pos.0;
-                            let dy = players.get(&addr).unwrap().pos.1 - player.pos.1;
-                            attack_request_buffer.push((players.get(&addr).unwrap().id, Some((player.id)), direction));
-                            dist = ((dx * dx + dy * dy) as f64).sqrt();
-                        }
-                    }
-
-                    println!("Attack requested, distance {}", dist);
-                }
             }
         }
 
-        send_new_positions(&players, socket.clone());
-        if attack_request_buffer.len() > 0{
-            send_all_attacks(&players, socket.clone(), attack_request_buffer);  
-        }
+        tick_counter += 1;
+        send_game_state(&players, socket.clone(), tick_counter);
     }
 }
 
-fn send_all_attacks(players: &HashMap<SocketAddr, Player>, socket: Arc<UdpSocket>, attack_request_buffer : Vec<(u8, Option<u8>, u8)>){
-    let mut data: Vec<u8> = Vec::new();
-    data.push(4u8);
-    data.push(attack_request_buffer.len() as u8);
-    for i in attack_request_buffer{
-        match i.1 {
-            Some(player) => {
-                data.push(i.0);
-                data.push(player);
-                let mut hp = 0;
-                for j in players.values(){
-                    if j.id == player{
-                        hp = j.health
-                    }
-                }
-                data.push(i.2);
-                data.extend_from_slice(&hp.to_le_bytes());
-            }
-            None => {
-                data.push(i.0);
-                data.push(0u8);
-                data.push(i.2);
-                data.extend_from_slice(&0i32.to_le_bytes());
-            }
-        }
+fn send_game_state(players: &HashMap<SocketAddr, Player>, socket: Arc<UdpSocket>, tick_counter: u8){
+    if players.is_empty() { return };
+
+    let mut data: Vec<u8> = Vec::with_capacity(3 + players.len() * 20);
+
+    data.push(2u8);
+    data.push(tick_counter);
+    data.push(players.len() as u8);
+
+    for player in players.values(){
+        data.push(player.id);
+        data.extend_from_slice(&player.health.to_le_bytes());
+        data.push(player.direction);
+        data.extend_from_slice(&player.pos.0.to_le_bytes());
+        data.extend_from_slice(&player.pos.1.to_le_bytes());
+        data.push(player.is_attacking);
+        data.push(player.is_dodging);
+        data.push(player.current_weapon);
     }
 
+    let data = Arc::new(data);
     let addrs: Vec<SocketAddr> = players.keys().cloned().collect();
 
     tokio::spawn(async move {
         for addr in addrs{
             let _ = socket.send_to(&data, addr).await;
-        }
-    });
-}
-
-fn send_new_positions(players: &HashMap<SocketAddr, Player>, socket: Arc<UdpSocket>) {
-    if players.is_empty() { return; }
-
-    let mut data = Vec::with_capacity(6 + (players.len() * 9));
-    data.push(3u8);
-    data.push(players.len() as u8);
-
-    for player in players.values() {
-        data.push(player.id);
-        data.extend_from_slice(&player.pos.0.to_le_bytes());
-        data.extend_from_slice(&player.pos.1.to_le_bytes());
-        data.push(player.direction);
-    }
-
-    let shared_data = Arc::new(data);
-    let addrs: Vec<SocketAddr> = players.keys().cloned().collect();
-
-    tokio::spawn(async move {
-        for addr in addrs {
-            let _ = socket.send_to(&shared_data, addr).await;
         }
     });
 }
