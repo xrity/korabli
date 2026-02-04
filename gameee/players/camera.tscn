@@ -1,0 +1,4 @@
+[gd_scene format=3 uid="uid://d1kdjht2q2i5m"]
+
+[node name="Camera" type="Camera2D" unique_id=1719473312]
+enabled = false

@@ -1,36 +1,35 @@
 extends Node
 
-@onready var map: Node2D = $".."
+@onready var lobby: Node2D = $".."
+
 var udp := PacketPeerUDP.new()
 var server_address := "10.10.135.240"
 var server_port := 9001
-var is_connected = false
-var packet_buffer = []
-var last_packet_time = 0
 
+var packet_buffer = []
+
+var tick_server = 0
+var tick_client = 0
+var tick_server_got = false
+
+func _physics_process(delta: float) -> void:
+	if tick_server_got:
+		tick_client = wrap(tick_client+1, 0, 255)
 
 func _ready():
 	var err = udp.set_dest_address(server_address, server_port)
 	if err == OK:
-		print("UDP готов к работе")
-		is_connected = true
+		print("Connected")
 
 func _process(delta: float) -> void:
 	while udp.get_available_packet_count() > 0:
 		var packet = udp.get_packet()
 		packet_buffer.append(packet)
-		var now = Time.get_ticks_msec()
-		if now - last_packet_time > 60:
-			print(now - last_packet_time)
-		last_packet_time = now
 	
 	if packet_buffer:
 		for packet in packet_buffer:
 			data_process(packet)
 		packet_buffer.clear()
-
-func _physics_process(delta: float) -> void:
-	pass
 
 func send(msg):
 	var packet = msg.data_array
@@ -46,45 +45,41 @@ func data_process(packet):
 	
 	var req = buffer.get_u8()
 	if req == 0:
+		tick_server = buffer.get_u8()
+		tick_client = tick_server
+		tick_server_got = true
 		var id = buffer.get_u8()
-		var posx = buffer.get_32()
-		var posy = buffer.get_32()
-		map.spawn_self(id, posx, posy)
+		var hp = buffer.get_u32()
+		var posx = buffer.get_float()
+		var posy = buffer.get_float()
+		lobby.spawn_self(id, hp, posx, posy)
 	if req == 1:
 		var id = buffer.get_u8()
-		var posx = buffer.get_32()
-		var posy = buffer.get_32()
+		var hp = buffer.get_u32()
+		var posx = buffer.get_float()
+		var posy = buffer.get_float()
 		var name_len = buffer.get_u8()
 		var pname = buffer.get_utf8_string(name_len)
-		map.spawn_entity(id, posx, posy, pname)
-		
+		lobby.spawn_entity(id, hp, pname, posx, posy)
 	if req == 2:
-		var apr = buffer.get_u8()
-		if !apr:
-			var posx = buffer.get_32()
-			var posy = buffer.get_32()
-			map.move_self(posx, posy)
-	if req == 3:
+		tick_server = buffer.get_u8()
+		var tick_diff = tick_client - tick_server
+		if abs(tick_diff) > 10:
+			tick_client = tick_server
+			
 		var players_count = buffer.get_u8()
-		for i in players_count:
+		for i in range(players_count):
 			var id = buffer.get_u8()
-			var posx = buffer.get_32()
-			var posy = buffer.get_32()
-			var arm_angle = buffer.get_u8()
-			map.move_entity(id, posx, posy, arm_angle)
-	if req == 4:
-		var pair_count = buffer.get_u8()
-		for i in pair_count:
-			var idatt = buffer.get_u8()
-			var idget = buffer.get_u8()
-			if idget != 0:
-				var arm_angle = buffer.get_u8()
-				var hpget = buffer.get_64()
-				map.attack_entity(idatt, idget, arm_angle, hpget)
-			else:
-				var arm_angle = buffer.get_u8()
-				var hpget = buffer.get_u8()
-				map.attack_entity(idatt, idget, arm_angle, hpget)
-				
-	
-		
+			var hp = buffer.get_u32()
+			var angle = buffer.get_u8()
+			var posx = buffer.get_float()
+			var posy = buffer.get_float()
+			var is_attacking = buffer.get_u8()
+			var is_dodge = buffer.get_u8()
+			var weapon = buffer.get_u8()
+			lobby.game_state_process(
+				tick_server, id, hp, 
+				angle, posx, posy, 
+				is_attacking, is_dodge, 
+				weapon
+			)

@@ -1,0 +1,31 @@
+[gd_scene format=3 uid="uid://b7p3eujfskjxs"]
+
+[ext_resource type="Script" uid="uid://doddu0604armd" path="res://scripts/lobby.gd" id="1_yi22s"]
+[ext_resource type="PackedScene" uid="uid://v2m85se6qmti" path="res://main/server.tscn" id="2_8rcol"]
+[ext_resource type="Script" uid="uid://bfuuj1ft0kppt" path="res://scripts/server.gd" id="3_uuwdn"]
+[ext_resource type="Texture2D" uid="uid://dtnmj63mhfku" path="res://icon.svg" id="4_8rcol"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_uuwdn"]
+size = Vector2(138.00002, 10)
+
+[node name="lobby" type="Node2D" unique_id=1763456145]
+script = ExtResource("1_yi22s")
+is_Online = true
+
+[node name="server" parent="." unique_id=299605802 instance=ExtResource("2_8rcol")]
+script = ExtResource("3_uuwdn")
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=774364190]
+
+[node name="StaticBody2D" type="StaticBody2D" parent="." unique_id=1121784490]
+
+[node name="Sprite2D" type="Sprite2D" parent="StaticBody2D" unique_id=1643401404]
+position = Vector2(96, 0)
+scale = Vector2(0.75, 0.01)
+texture = ExtResource("4_8rcol")
+offset = Vector2(-64, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="StaticBody2D" unique_id=554960315]
+position = Vector2(51.749985, -0.05000001)
+scale = Vector2(0.7500001, 0.01)
+shape = SubResource("RectangleShape2D_uuwdn")

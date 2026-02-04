@@ -1,55 +1,62 @@
 extends CharacterBody2D
 
 @onready var server: Node = $"../server"
-@onready var map: Node2D = $".."
+@onready var lobby: Node2D = $".."
 @onready var anim: AnimationPlayer = $anim
+
+@onready var weapons_list = [
+	preload("res://weapon/weapon_0.tscn")
+]
 
 @onready var namelabel: Label = $namelabel
 @onready var hplabel: Label = $hplabel
 
-@onready var arm: Sprite2D = $arm
-@onready var attack_area: Area2D = $arm/attack_area
-@onready var anim_arm: AnimationPlayer = $anim_arm
-@onready var arm_collider: CollisionShape2D = $arm/attack_area/arm_collider
+@onready var arm_node: Node2D = $armNode
+
+@onready var anim_dash: AnimationPlayer = $anim_dash
 
 
-var targepos = Vector2(0, 0)
-
-
+var hp = 100
 var speed = 100
+var weapons = [0, 0]
+var current_weapon = null
+var weapon_change = 0
+
+var weapon_indx = null
+
 var idp = null
 var pname = null
-var direction = Vector2(0, 0)
-var dir_buffer = 'down'
-var is_attacking = false
-var hp = 100
 
-var move_buffer = []
+var direction = Vector2(0, 0)
+var targepos = Vector2(0, 0)
+var dir_buffer = 'down'
+
+var is_attacking = false
+var is_dashing = false
+
+var move_buffer_client = {}
+var move_buffer_server  = []
 var attack_buffer = []
 
-
 func _physics_process(delta: float) -> void:
-	if idp == map.mainPlayerId:
-		if direction:
-			var angle_255 = int(remap(arm.rotation_degrees, 0, 360, 0, 255))
-			var msg = StreamPeerBuffer.new()
-			msg.put_u8(2)
-			msg.put_32(position.x)
-			msg.put_32(position.y)
-			msg.put_u8(angle_255)
-			
-			server.send(msg)
-
-func _process(delta: float) -> void:
-	if idp == map.mainPlayerId:
-		arm.look_at(get_global_mouse_position())
-		arm.rotation_degrees = wrapf(arm.rotation_degrees, 0, 360)
-		direction = Input.get_vector("a", "d", "w", "s")
+	if idp == lobby.mainPlayerId:
+		if lobby.is_Online:
+			send_data()
+			move_buffer_client[server.tick_client] = Vector2(position.x, position.y)
+		arm_node.look_at(get_global_mouse_position())
+		arm_node.rotation_degrees = wrapf(arm_node.rotation_degrees, 0, 360)
+		direction = Input.get_vector("left", "right", "up", "down")
 		velocity = speed * direction
 		move_and_slide()
 		
-		if Input.is_action_just_pressed("k") and not is_attacking:
-			attack_process()
+		if Input.is_action_just_pressed("attack") and not is_attacking:
+			attack()
+			
+		if Input.is_action_just_pressed("change weapon") and not is_attacking:
+			change_weapon()
+				
+		if Input.is_action_just_pressed("dash") and not is_dashing and not is_attacking:
+			dash()
 			
 	else:
 		move_interpolation()
@@ -57,38 +64,56 @@ func _process(delta: float) -> void:
 	hplabel.text = str(hp)
 	animation_process(direction.x, direction.y)
 	
+func move_aprove_from_server(tick_serv, newposx, newposy):
+	if tick_serv in move_buffer_client:
+		var history_pos = move_buffer_client[tick_serv]
+		var server_pos = Vector2(newposx, newposy)
+		
+		print(position, ' ',history_pos, ' ', server_pos)
 
-func _ready():
-	pass
+		if history_pos.distance_to(server_pos) > 10.0:
+			position = server_pos
 
-func update_arm_angle(new_arm_angle, indx):
-	var new_arm_angle_360 = remap(new_arm_angle, 0, 255, 0, 360)
 	
-	if abs(arm.rotation_degrees - new_arm_angle_360) > 2.5:
-		arm.rotation_degrees = lerpf(arm.rotation_degrees, new_arm_angle_360, indx)
-	else:
-		arm.rotation_degrees = new_arm_angle_360
+	var keys_to_remove = []
+	for t in move_buffer_client.keys():
+		var diff = t - tick_serv
+		if diff <= 0 and diff > -128: 
+			keys_to_remove.append(t)
+		elif diff > 128:
+			keys_to_remove.append(t)
+
+	for k in keys_to_remove:
+		move_buffer_client.erase(k)
+
+func update_arm_angle(new_arm_angle):
+	var new_arm_angle_360 = remap(new_arm_angle, 0, 255, 0, 360)
+	arm_node.rotation_degrees = new_arm_angle_360
 
 func move_interpolation():
-	if len(move_buffer) > 0:
-		targepos = move_buffer[-1]
-		move_buffer.clear()
-		
-	if abs(targepos.x - position.x) > 2.5:
-		position.x = lerpf(position.x, targepos.x, 0.05)
+	if len(move_buffer_server) > 0:
+		targepos = move_buffer_server[0]
+	
+	if abs(targepos.x - position.x) > 200:
+		position.x = targepos.x
+	elif abs(targepos.x - position.x) > 2.5:
+		position.x = lerpf(position.x, targepos.x, 0.1)
 	else:
 		position.x = targepos.x
 	
-	if abs(targepos.y - position.y) > 2.5:
-		position.y = lerpf(position.y, targepos.y, 0.05)
+	if abs(targepos.y - position.y) > 200:
+		position.y = targepos.y
+	elif abs(targepos.y - position.y) > 2.5:
+		position.y = lerpf(position.y, targepos.y, 0.1)
 	else:
 		position.y = targepos.y
 		
 	direction.x = targepos.x - position.x
 	direction.y = targepos.y - position.y
+	move_buffer_server.clear()
 
 func update_position(new_pos: Vector2):
-	move_buffer.append(new_pos)
+	move_buffer_server.append(new_pos)
 
 func setPlayerName(nameinput):
 	pname = nameinput
@@ -115,28 +140,66 @@ func direction_process(dirx, diry):
 		return "up"
 	else: return dir_buffer
 
-func attack_process():
-	is_attacking = true
-	arm_collider.disabled = false
-	anim_arm.play("attack")
+func change_weapon():
+	weapon_change = (weapon_change + 1)%2
+	update_weapon(weapons[weapon_change])
 	
-	await anim_arm.animation_finished
-	arm_collider.disabled = true
+func update_weapon(wp):
+	weapon_indx = wp
+	if current_weapon:
+		current_weapon.del
+	
+	current_weapon = weapons_list[wp].instantiate()
+	arm_node.add_child(current_weapon)
+	
+func dash():
+	is_dashing = true
+	anim_dash.play("dash")
+	
+	await anim_dash.animation_finished
+	is_dashing = false
+
+func attack():
+	if not current_weapon:
+		return
+	is_attacking = true
+	if direction == Vector2(0, 0):
+		current_weapon.anim_attack.play("attack_idle")
+	elif is_dashing:
+		current_weapon.anim_attack.play("attack_dash")
+	else:
+		current_weapon.anim_attack.play("attack_run")
+		
+	await current_weapon.anim_attack.animation_finished
 	is_attacking = false
+		
 
-
-func _on_attack_area_area_entered(area: Area2D) -> void:
-	if area.name == "hitbox_area" and is_attacking:
-		if "idp" in area.get_parent() and area.get_parent().idp != self.idp:
-			var msg = StreamPeerBuffer.new()
-			var angle_255 = int(remap(arm.rotation_degrees, 0, 360, 0, 255))
-			msg.put_u8(4)
-			msg.put_u8(area.get_parent().idp)
-			msg.put_u8(angle_255)
-			
-			server.send(msg)
-	#elif is_attacking:
-		#var msg = StreamPeerBuffer.new()
-		#var angle_255 = int(remap(arm.rotation_degrees, 0, 360, 0, 255))
-		#msg.put_u8(4)
-		#msg.put_u8(angle_255)
+func send_data():
+	var angle_255 = int(remap(arm_node.rotation_degrees, 0, 360, 0, 255))
+	var msg = StreamPeerBuffer.new()
+	msg.put_u8(2)
+	
+	msg.put_u8(angle_255)
+	msg.put_8(roundi(direction.x))
+	msg.put_8(roundi(direction.y))
+	
+	if is_dashing:
+		msg.put_u8(1)
+	else:
+		msg.put_u8(0)
+		
+	msg.put_u8(weapon_change)
+	
+	if is_attacking:
+		msg.put_u8(1)
+		msg.put_u8(len(attack_buffer))
+		msg.put_u8(server.tick_client)
+		if len(attack_buffer):
+			for i in attack_buffer:
+				msg.put_u8(i)
+	else:
+		msg.put_u8(0)
+		
+		
+	server.send(msg)
+	attack_buffer.clear()
