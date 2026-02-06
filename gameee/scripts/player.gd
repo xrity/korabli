@@ -5,7 +5,8 @@ extends CharacterBody2D
 @onready var anim: AnimationPlayer = $anim
 
 @onready var weapons_list = [
-	preload("res://weapon/weapon_0.tscn")
+	preload("res://weapon/weapon_0.tscn"),
+	preload("res://weapon/weapon_1.tscn")
 ]
 
 @onready var namelabel: Label = $namelabel
@@ -18,7 +19,7 @@ extends CharacterBody2D
 
 var hp = 100
 var speed = 100
-var weapons = [0, 0]
+var weapons = [0, 1]
 var current_weapon = null
 var weapon_change = 0
 
@@ -45,11 +46,18 @@ func _physics_process(delta: float) -> void:
 		if lobby.is_Online:
 			send_data()
 			move_buffer_client[server.tick_client] = Vector2(position.x, position.y)
-		arm_node.look_at(get_global_mouse_position())
-		arm_node.rotation_degrees = wrapf(arm_node.rotation_degrees, 0, 360)
-		direction = Input.get_vector("left", "right", "up", "down")
-		velocity = speed * direction
-		move_and_slide()
+		
+		if not is_attacking:
+			arm_node.look_at(get_global_mouse_position())
+			arm_node.rotation_degrees = wrapf(arm_node.rotation_degrees, 0, 360)
+			if arm_node.rotation_degrees < 270 and arm_node.rotation_degrees > 90:
+				arm_node.get_child(0).get_child(0).scale.y = -1
+			else:
+				arm_node.get_child(0).get_child(0).scale.y = 1
+		
+		if not is_dashing:
+			direction = Input.get_vector("left", "right", "up", "down")
+			velocity = speed * direction
 		
 		if direction:
 			is_moving = true
@@ -64,6 +72,8 @@ func _physics_process(delta: float) -> void:
 				
 		if Input.is_action_just_pressed("dash") and not is_dashing and not is_attacking:
 			dash()
+			
+		move_and_slide()
 			
 	else:
 		move_interpolation()
@@ -93,7 +103,11 @@ func move_aprove_from_server(tick_serv, newposx, newposy):
 
 func update_arm_angle(new_arm_angle):
 	var new_arm_angle_360 = remap(new_arm_angle, 0, 255, 0, 360)
-	arm_node.rotation_degrees = new_arm_angle_360
+	arm_node.rotation_degrees = new_arm_angle_360	
+	if arm_node.rotation_degrees < 270 and arm_node.rotation_degrees > 90:
+		arm_node.get_child(0).get_child(0).scale.y = -1
+	else:
+		arm_node.get_child(0).get_child(0).scale.y = 1
 
 func move_interpolation():
 	if len(move_buffer_server) > 0:
@@ -152,14 +166,17 @@ func change_weapon():
 func update_weapon(wp):
 	weapon_indx = wp
 	if current_weapon:
-		current_weapon.del
+		current_weapon.queue_free()
 	
 	current_weapon = weapons_list[wp].instantiate()
 	arm_node.add_child(current_weapon)
-	
+	current_weapon.anim_attack.play("get")
+		
 func dash():
 	is_dashing = true
 	anim_dash.play("dash")
+	
+	velocity = direction * 300
 	
 	await anim_dash.animation_finished
 	is_dashing = false
@@ -178,7 +195,6 @@ func attack():
 	await current_weapon.anim_attack.animation_finished
 	is_attacking = false
 		
-
 func send_data():
 	var angle_255 = int(remap(arm_node.rotation_degrees, 0, 360, 0, 255))
 	var msg = StreamPeerBuffer.new()

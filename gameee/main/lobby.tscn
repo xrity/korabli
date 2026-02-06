@@ -10,7 +10,6 @@ size = Vector2(138.00002, 10)
 
 [node name="lobby" type="Node2D" unique_id=1763456145]
 script = ExtResource("1_yi22s")
-is_Online = true
 
 [node name="server" parent="." unique_id=299605802 instance=ExtResource("2_8rcol")]
 script = ExtResource("3_uuwdn")
